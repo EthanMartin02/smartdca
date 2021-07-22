@@ -2,6 +2,9 @@ import pandas as pd
 import cbpro
 import os
 
+# turn all your magic numbers into variables here for easier tweaking
+# ex: percentLimit = 5, upperLimit = 60000, etc.
+
 # Set up cbpro API authentication with environmental variables and
 # initialize the client.
 def cbproAPISetup():
@@ -19,6 +22,14 @@ def getPercent(open, last):
 # do nothing depending on if the price and percent gain/loss
 # of the day meet the proper criteria.
 def smartdca(client, percentLimit, upperLimit, lowerLimit, orderSize, exchange):
+    # check the last purchase date
+    # if < 24 hours:
+        # if down 5% from last buy:
+            # smart dca again
+        # else:
+            # quit
+    # else:
+    # below code is fine
     currStats = client.get_product_24hr_stats(exchange)
     open = float(currStats['open'])
     last = float(currStats['last'])
