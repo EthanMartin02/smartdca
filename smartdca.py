@@ -1,9 +1,20 @@
+import bs4
 import pandas as pd
 import cbpro
 import os
+from dateutil import parser
+from bs4 import BeautifulSoup
+import urllib.request
 
-# turn all your magic numbers into variables here for easier tweaking
-# ex: percentLimit = 5, upperLimit = 60000, etc.
+# Specifications/limits for when to automatically
+# buy/sell ethereum and bitcoin.
+percentLimit = 5
+btcLowerLimit = 35000
+btcUpperLimit = 60000
+ethLowerLimit = 2200
+ethUpperLimit = 4000
+btcSize = 20
+ethSize = 30
 
 # Set up cbpro API authentication with environmental variables and
 # initialize the client.
@@ -11,36 +22,70 @@ def cbproAPISetup():
     apiKey = os.environ.get('cbpro_api_key')
     apiSecret = os.environ.get('cbpro_api_secret')
     apiPassword = os.environ.get('cbpro_api_pw')
-    auth_client = cbpro.AuthenticatedClient(apiKey, apiSecret, apiPassword)
+    sandboxapiKey = os.environ.get('cbpro_sandbox_api_key')
+    sandboxapiSecret = os.environ.get('cbpro_sandbox_api_secret')
+    sandboxapiPassword = os.environ.get('cbpro_sandbox_api_pw')
+    #auth_client = cbpro.AuthenticatedClient(apiKey, apiSecret, apiPassword)
+    auth_client = cbpro.AuthenticatedClient(sandboxapiKey, sandboxapiSecret, sandboxapiPassword, api_url="https://api-public.sandbox.pro.coinbase.com")
     return auth_client
 
-# Generates the percent gain/loss for the current day.
-def getPercent(open, last):
-    return round(((last-open)/open) * 100, 2)
+
+# Constants returned by getPercentLimitDecision.
+# Represents whether the percent change of the day indicates
+# to buy, sell, or do nothing.
+SELL = -1
+NONE = 0
+BUY = 1
+
+# Returns the decision to buy, sell, or do nothing
+# based off of the percent change calculated.
+def getPercentLimitDecision(open, last):
+    percent = round(((last-open)/open) * 100, 2)
+    if (percent > percentLimit):
+        return SELL
+    elif (percent < -percentLimit):
+        return BUY
+    return NONE
+
+# length of date format used for comparing
+# last order date to current date
+TIME_FORMAT = len('xxxx-xx-xx')
+
 
 # Using the limits provided, decides to either buy, sell, or
 # do nothing depending on if the price and percent gain/loss
 # of the day meet the proper criteria.
-def smartdca(client, percentLimit, upperLimit, lowerLimit, orderSize, exchange):
-    # check the last purchase date
-    # if < 24 hours:
-        # if down 5% from last buy:
-            # smart dca again
-        # else:
-            # quit
-    # else:
-    # below code is fine
-    currStats = client.get_product_24hr_stats(exchange)
-    open = float(currStats['open'])
-    last = float(currStats['last'])
-    percent = getPercent(open, last)
-    if (abs(percent) >= percentLimit):
-        if (percent > 0):
+def smartdca(client, upperLimit, lowerLimit, orderSize, exchange):
+    #balance = float(client.get_account('2d9c32ee-db22-4850-b4c8-c14857b95a1c')['balance'])
+    sandboxBalance = float(client.get_account('81c7c3a7-6719-4c62-9bcd-38e7fae325af')['balance'])
+    balance = sandboxBalance
+    if balance >= 0:
+        currStats = client.get_product_24hr_stats(exchange)
+        open = float(currStats['open'])
+        last = float(currStats['last'])
+        fills = list(client.get_fills(product_id=exchange))
+        if len(fills) > 0:
+            lastFill = fills[0]
+            currDay = client.get_time()['iso'][0:TIME_FORMAT]
+            lastOrder = lastFill['created_at'][0:TIME_FORMAT]
+            # If an order has already been placed for the day,
+            # then the price of the last order will be used instead
+            # of the open price.
+            if currDay == lastOrder:
+                open = float(lastFill['price'])
+        decision = getPercentLimitDecision(open, last)
+        if decision == SELL:
             if (last > upperLimit):
-                print("buy $" + orderSize + " " + exchange)
-        else:
+                client.place_market_order(product_id=exchange,
+                                            side='sell',
+                                            funds=str(orderSize))
+                print("buy $" + str(orderSize) + " " + exchange)
+        elif decision == BUY:
             if (last < lowerLimit):
-                print("sell $" + orderSize + " " + exchange)
+                client.place_market_order(product_id=exchange,
+                            side='buy',
+                            funds=str(orderSize))
+                print("sell $" + str(orderSize) + " " + exchange)
 
 # Driver of the program. This is where the limits for percentages
 # and prices can be set. The smartdca method can be called for
@@ -48,9 +93,11 @@ def smartdca(client, percentLimit, upperLimit, lowerLimit, orderSize, exchange):
 def main():
     client = cbproAPISetup()
     print("run btc")
-    smartdca(client, 5, 60000, 35000, 20, 'BTC-USD')
+    smartdca(client, btcUpperLimit, btcLowerLimit, btcSize, 'BTC-USD')
     print("run eth")
-    smartdca(client, 5, 3000, 2200, 30, 'ETH-USD')
+    #smartdca(client, ethUpperLimit, ethLowerLimit, ethSize, 'ETH-USD')
+    lastFill = list(client.get_orders())
+    currTime = parser.parse(client.get_time()['iso'])
     
 
 main()
